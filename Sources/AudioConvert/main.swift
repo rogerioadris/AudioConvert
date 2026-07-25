@@ -11,7 +11,7 @@ struct AudioConvertCommand: ParsableCommand {
     @Option(name: .shortAndLong, help: "Diretório de saída das gravações.")
     var output: String = "./Recordings"
 
-    @Option(name: .shortAndLong, help: "Pasta da biblioteca MP3 organizada (Artista/Álbum). Padrão: <output>/Biblioteca.")
+    @Option(name: .shortAndLong, help: "Pasta da biblioteca MP3 organizada por álbum. Padrão: <output>/Biblioteca.")
     var library: String?
 
     @Flag(name: .shortAndLong, help: "Toca o áudio nos alto-falantes durante a gravação (padrão: mudo).")

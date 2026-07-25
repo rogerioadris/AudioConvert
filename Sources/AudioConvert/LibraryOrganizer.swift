@@ -1,20 +1,15 @@
 import Foundation
 
 /// Resolve o destino do MP3 na biblioteca organizada:
-/// `<root>/<Album Artist>/<Álbum>/[D-]NN - Título.mp3`.
+/// `<root>/<Álbum>/[D-]NN - Título.mp3`.
 struct LibraryOrganizer: Sendable {
     let root: URL
 
     func destinationURL(for metadata: TrackMetadata) throws -> URL {
-        let artistDir = TrackMetadata.sanitizePathComponent(
-            metadata.effectiveAlbumArtist, fallback: "Unknown Artist"
-        )
         let albumDir = TrackMetadata.sanitizePathComponent(
             metadata.album, fallback: "Unknown Album"
         )
-        let directory = root
-            .appendingPathComponent(artistDir)
-            .appendingPathComponent(albumDir)
+        let directory = root.appendingPathComponent(albumDir)
         try FileManager.default.createDirectory(
             at: directory, withIntermediateDirectories: true
         )
