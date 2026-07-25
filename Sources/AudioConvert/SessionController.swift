@@ -7,18 +7,30 @@ import Foundation
 final class SessionController {
     private let recorder: ProcessTapRecorder
     private let exporter: AlacExporter
+    private let mp3Encoder: Mp3Encoder
+    private let organizer: LibraryOrganizer
     private let outputDir: URL
     private let conversionQueue = DispatchQueue(
         label: "audioconvert.convert", qos: .utility
     )
+    // Só roda o osascript bloqueante da capa; estado continua na main.
+    private let artworkQueue = DispatchQueue(
+        label: "audioconvert.artwork", qos: .utility
+    )
 
     private var currentTrack: TrackMetadata?
     private var currentTempURL: URL?
+    private var currentArtwork: ArtworkFile?
     private var paused = false
 
-    init(recorder: ProcessTapRecorder, exporter: AlacExporter, outputDir: URL) {
+    init(
+        recorder: ProcessTapRecorder, exporter: AlacExporter,
+        mp3Encoder: Mp3Encoder, organizer: LibraryOrganizer, outputDir: URL
+    ) {
         self.recorder = recorder
         self.exporter = exporter
+        self.mp3Encoder = mp3Encoder
+        self.organizer = organizer
         self.outputDir = outputDir
     }
 
@@ -63,15 +75,42 @@ final class SessionController {
         }
         currentTrack = metadata
         currentTempURL = tempURL
+        currentArtwork = nil
         paused = false
         Log.info("● Gravando: \(metadata.displayName)")
+        fetchArtwork(for: metadata)
+    }
+
+    /// A capa só existe via AppleScript enquanto a faixa é a current track,
+    /// então é buscada no início da gravação, em background.
+    private func fetchArtwork(for metadata: TrackMetadata) {
+        let outputDir = self.outputDir
+        artworkQueue.async { [weak self] in
+            let result = ArtworkFetcher.fetchCurrentTrackArtwork(tempDir: outputDir)
+            DispatchQueue.main.async {
+                guard let self, let result,
+                      let current = self.currentTrack,
+                      current.sameIdentity(as: metadata),
+                      result.trackName == metadata.name
+                else {
+                    // Faixa já trocou (skip rápido) — capa não é mais desta gravação.
+                    if let result {
+                        try? FileManager.default.removeItem(at: result.art.url)
+                    }
+                    return
+                }
+                self.currentArtwork = result.art
+            }
+        }
     }
 
     private func finalizeCurrent() {
         guard let tempURL = currentTempURL, let metadata = currentTrack else { return }
         let (frames, wasSilent) = recorder.closeFile()
+        let artwork = currentArtwork
         currentTempURL = nil
         currentTrack = nil
+        currentArtwork = nil
         paused = false
 
         if wasSilent {
@@ -84,14 +123,37 @@ final class SessionController {
         let recordedSeconds = recorder.sampleRate > 0
             ? Double(frames) / recorder.sampleRate
             : 0
-        var partial = false
-        if let totalMS = metadata.totalTimeMS, totalMS > 0 {
-            partial = recordedSeconds < (Double(totalMS) / 1000.0) * 0.9
+        if let totalMS = metadata.totalTimeMS, totalMS > 0,
+           recordedSeconds < (Double(totalMS) / 1000.0) * 0.9 {
+            try? FileManager.default.removeItem(at: tempURL)
+            if let artwork { try? FileManager.default.removeItem(at: artwork.url) }
+            Log.info(
+                "✗ Parcial descartada: \(metadata.displayName) "
+                    + "(\(Int(recordedSeconds))s de \(totalMS / 1000)s)"
+            )
+            return
         }
 
         let exporter = self.exporter
+        let encoder = self.mp3Encoder
+        let organizer = self.organizer
         conversionQueue.async {
-            exporter.export(tempURL: tempURL, metadata: metadata, partial: partial)
+            defer {
+                if let artwork { try? FileManager.default.removeItem(at: artwork.url) }
+            }
+            guard let alacURL = exporter.export(
+                tempURL: tempURL, metadata: metadata, artwork: artwork
+            ) else { return }
+            do {
+                let destination = try organizer.destinationURL(for: metadata)
+                try encoder.encode(
+                    alacURL: alacURL, metadata: metadata,
+                    artwork: artwork, to: destination
+                )
+                Log.info("♫ MP3: \(destination.path)")
+            } catch {
+                Log.warn("MP3 falhou para \(metadata.displayName): \(error). ALAC preservado.")
+            }
         }
     }
 }

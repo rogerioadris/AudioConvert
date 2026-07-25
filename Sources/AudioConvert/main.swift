@@ -11,12 +11,26 @@ struct AudioConvertCommand: ParsableCommand {
     @Option(name: .shortAndLong, help: "Diretório de saída das gravações.")
     var output: String = "./Recordings"
 
+    @Option(name: .shortAndLong, help: "Pasta da biblioteca MP3 organizada (Artista/Álbum). Padrão: <output>/Biblioteca.")
+    var library: String?
+
     @Flag(name: .shortAndLong, help: "Toca o áudio nos alto-falantes durante a gravação (padrão: mudo).")
     var monitor = false
 
     func run() throws {
+        guard let ffmpegURL = Mp3Encoder.locate() else {
+            throw RuntimeError(
+                "ffmpeg não encontrado (PATH, /opt/homebrew/bin, /usr/local/bin). "
+                    + "Instale com: brew install ffmpeg"
+            )
+        }
+
         let outputDir = URL(fileURLWithPath: (output as NSString).expandingTildeInPath)
         try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        let libraryDir = library.map {
+            URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath)
+        } ?? outputDir.appendingPathComponent("Biblioteca")
+        try FileManager.default.createDirectory(at: libraryDir, withIntermediateDirectories: true)
 
         let processObject = try MusicProcess.findAudioObject()
         let recorder = ProcessTapRecorder(processObject: processObject, monitor: monitor)
@@ -24,7 +38,11 @@ struct AudioConvertCommand: ParsableCommand {
 
         let exporter = AlacExporter(outputDir: outputDir)
         let session = SessionController(
-            recorder: recorder, exporter: exporter, outputDir: outputDir
+            recorder: recorder,
+            exporter: exporter,
+            mp3Encoder: Mp3Encoder(ffmpegURL: ffmpegURL),
+            organizer: LibraryOrganizer(root: libraryDir),
+            outputDir: outputDir
         )
 
         let notifications = MusicNotifications()
@@ -32,9 +50,11 @@ struct AudioConvertCommand: ParsableCommand {
         notifications.start()
 
         Log.info("AudioConvert iniciado.")
-        Log.info("  Saída:   \(outputDir.path)")
-        Log.info("  Monitor: \(monitor ? "on (alto-falantes)" : "off (mudo)")")
-        Log.info("  Teclas:  [m] monitor on/off   [q] sair")
+        Log.info("  Saída:      \(outputDir.path)")
+        Log.info("  Biblioteca: \(libraryDir.path)")
+        Log.info("  ffmpeg:     \(ffmpegURL.path)")
+        Log.info("  Monitor:    \(monitor ? "on (alto-falantes)" : "off (mudo)")")
+        Log.info("  Teclas:     [m] monitor on/off   [q] sair")
 
         // Música já tocando ao iniciar? Começa a gravar já (será parcial).
         if let state = MusicScripting.currentState(), state.playing {

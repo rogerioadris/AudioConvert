@@ -6,9 +6,11 @@ import Foundation
 struct AlacExporter {
     let outputDir: URL
 
-    func export(tempURL: URL, metadata: TrackMetadata, partial: Bool) {
-        let baseName = metadata.sanitizedFileName + (partial ? " (partial)" : "")
-        let destination = uniqueURL(baseName: baseName)
+    /// Retorna a URL do ALAC final no sucesso (mesmo no fallback sem tags);
+    /// nil se a conversão falhou.
+    @discardableResult
+    func export(tempURL: URL, metadata: TrackMetadata, artwork: ArtworkFile?) -> URL? {
+        let destination = uniqueURL(baseName: metadata.sanitizedFileName)
         let converted = outputDir.appendingPathComponent(".conv-\(UUID().uuidString).m4a")
 
         do {
@@ -18,11 +20,11 @@ struct AlacExporter {
                 "Conversão falhou para \(metadata.displayName): \(error). "
                     + "PCM preservado em \(tempURL.lastPathComponent)"
             )
-            return
+            return nil
         }
 
         do {
-            try tag(converted, to: destination, metadata: metadata)
+            try tag(converted, to: destination, metadata: metadata, artwork: artwork)
             try? FileManager.default.removeItem(at: converted)
         } catch {
             Log.warn("Tags falharam para \(metadata.displayName): \(error). Salvando sem tags.")
@@ -30,12 +32,13 @@ struct AlacExporter {
                 try FileManager.default.moveItem(at: converted, to: destination)
             } catch {
                 Log.warn("Falha ao mover arquivo final: \(error)")
-                return
+                return nil
             }
         }
 
         try? FileManager.default.removeItem(at: tempURL)
         Log.info("✔ Salvo: \(destination.lastPathComponent)")
+        return destination
     }
 
     private func convert(from source: URL, to destination: URL) throws {
@@ -62,14 +65,16 @@ struct AlacExporter {
     }
 
     /// Reexporta em passthrough (sem reencodar) só para embutir as tags.
-    private func tag(_ source: URL, to destination: URL, metadata: TrackMetadata) throws {
+    private func tag(
+        _ source: URL, to destination: URL, metadata: TrackMetadata, artwork: ArtworkFile?
+    ) throws {
         let asset = AVURLAsset(url: source)
         guard let session = AVAssetExportSession(
             asset: asset, presetName: AVAssetExportPresetPassthrough
         ) else {
             throw RuntimeError("Falha ao criar sessão de export.")
         }
-        session.metadata = Self.metadataItems(metadata)
+        session.metadata = Self.metadataItems(metadata, artwork: artwork)
 
         let semaphore = DispatchSemaphore(value: 0)
         var exportError: Error?
@@ -85,7 +90,9 @@ struct AlacExporter {
         if let exportError { throw exportError }
     }
 
-    private static func metadataItems(_ metadata: TrackMetadata) -> [AVMetadataItem] {
+    private static func metadataItems(
+        _ metadata: TrackMetadata, artwork: ArtworkFile?
+    ) -> [AVMetadataItem] {
         var items: [AVMetadataItem] = []
         func add(_ identifier: AVMetadataIdentifier, _ value: String) {
             guard !value.isEmpty else { return }
@@ -98,6 +105,37 @@ struct AlacExporter {
         add(.iTunesMetadataSongName, metadata.name)
         add(.iTunesMetadataArtist, metadata.artist)
         add(.iTunesMetadataAlbum, metadata.album)
+        add(.iTunesMetadataAlbumArtist, metadata.albumArtist)
+        add(.iTunesMetadataUserGenre, metadata.genre)
+        if let year = metadata.year {
+            add(.iTunesMetadataReleaseDate, String(year))
+        }
+
+        // trkn/disk são átomos binários (pares UInt16 big-endian), não strings.
+        func addPairAtom(_ identifier: AVMetadataIdentifier, _ number: Int?, _ count: Int?, trailingPad: Bool) {
+            guard let number else { return }
+            var bytes: [UInt8] = [0, 0]
+            for value in [number, count ?? 0] {
+                let clamped = UInt16(clamping: value)
+                bytes += [UInt8(clamped >> 8), UInt8(clamped & 0xFF)]
+            }
+            if trailingPad { bytes += [0, 0] }
+            let item = AVMutableMetadataItem()
+            item.identifier = identifier
+            item.value = Data(bytes) as NSData
+            item.dataType = kCMMetadataBaseDataType_RawData as String
+            items.append(item)
+        }
+        addPairAtom(.iTunesMetadataTrackNumber, metadata.trackNumber, metadata.trackCount, trailingPad: true)
+        addPairAtom(.iTunesMetadataDiscNumber, metadata.discNumber, metadata.discCount, trailingPad: false)
+
+        if let artwork, let data = try? Data(contentsOf: artwork.url) {
+            let item = AVMutableMetadataItem()
+            item.identifier = .iTunesMetadataCoverArt
+            item.value = data as NSData
+            item.dataType = artwork.format.avDataType
+            items.append(item)
+        }
         return items
     }
 
