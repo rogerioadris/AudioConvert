@@ -3,7 +3,10 @@
 Gravador de áudio do **Apple Music** para macOS. Captura **apenas** o áudio do
 processo do Music (via Core Audio *process tap* — sem driver virtual, sem
 BlackHole) e salva **um arquivo ALAC (`.m4a`) por faixa**, nomeado e com tags a
-partir das notificações de troca de faixa do player.
+partir das notificações de troca de faixa do player. Cada faixa também é
+convertida para **MP3 320 kbps** e organizada numa biblioteca por álbum
+(`Recordings/Biblioteca/<Álbum>/NN - Título.mp3`), da qual dá para gerar
+**playlists M3U8** (geral e por cantor).
 
 - Som de outros apps e do sistema **não** entra na gravação.
 - Por padrão a gravação é **silenciosa** (nada sai nos alto-falantes); dá para
@@ -15,7 +18,9 @@ partir das notificações de troca de faixa do player.
 
 - macOS 15+ (a API de process tap existe desde o macOS 14.4).
 - Swift instalado (Xcode ou Command Line Tools).
-- Apple Music aberto.
+- **ffmpeg** (`brew install ffmpeg`) — conversão MP3 e leitura de tags
+  (ffprobe vem junto).
+- Apple Music aberto (só para gravar; `playlist` funciona sem ele).
 
 ## Configuração obrigatória do Apple Music
 
@@ -41,12 +46,17 @@ Binário em `.build/release/AudioConvert`.
 
 ## Uso
 
+O binário tem dois subcomandos: `record` (padrão — pode ser omitido) e
+`playlist`.
+
+### Gravar
+
 ```sh
 # gravação padrão (mudo, saída em ./Recordings)
 .build/release/AudioConvert
 
-# escolher diretório de saída
-.build/release/AudioConvert --output ~/Music/Gravacoes
+# escolher diretório de saída e/ou da biblioteca MP3
+.build/release/AudioConvert --output ~/Music/Gravacoes --library ~/Music/Biblioteca
 
 # ouvir nos alto-falantes desde o início
 .build/release/AudioConvert --monitor
@@ -54,7 +64,40 @@ Binário em `.build/release/AudioConvert`.
 
 Depois é só dar play no Apple Music (arquivos locais). A cada troca de faixa o
 gravador fecha o arquivo anterior, converte para ALAC, grava as tags (título,
-artista, álbum) e o salva como `Artista - Título.m4a`.
+artista, álbum) e o salva como `Artista - Título.m4a`. Em seguida converte para
+MP3 320 (tags + capa embutidas) em
+`<biblioteca>/<Álbum>/NN - Título.mp3`.
+
+### Gerar playlists
+
+```sh
+# usa ./Recordings/Biblioteca
+.build/release/AudioConvert playlist
+
+# biblioteca em outro lugar
+.build/release/AudioConvert playlist --library ~/Music/Biblioteca
+
+# dupla com "&" que não deve ser dividida em dois cantores (repetível)
+.build/release/AudioConvert playlist --keep "Roupa Nova & Amigos"
+```
+
+Escaneia os MP3s da biblioteca e escreve em `<Biblioteca>/Playlists/`:
+
+- `Biblioteca.m3u8` — todas as faixas, ordenadas por álbum e número da faixa.
+- `<Cantor>.m3u8` — uma playlist por cantor. Faixa com mais de um cantor na
+  tag (ex.: `Anitta part. Ludmilla`) entra na playlist **de cada um**.
+
+Regras de divisão da tag de artista:
+
+- Dividem: `feat.`, `ft.`, `part.`, `participação`, vírgula, `;`, `/` e ` & `.
+- ` & ` tem exceções: duplas conhecidas (Chitãozinho & Xororó, Sandy & Junior,
+  Zezé Di Camargo & Luciano…) ficam juntas — estenda com `--keep`.
+- ` e ` nunca divide (Jorge e Mateus é dupla, não dois cantores).
+
+Rodar de novo regenera tudo: playlists de artistas que saíram da biblioteca
+são removidas. Os caminhos dentro do `.m3u8` são relativos, então a pasta da
+biblioteca pode ser movida inteira sem quebrar as playlists (VLC, Music,
+foobar2000 abrem direto).
 
 **Teclas durante a execução:**
 
@@ -98,7 +141,8 @@ ffmpeg -i "Recordings/arquivo.m4a" -af astats -f null - 2>&1 | grep "Peak level"
 
 ## Comportamento
 
-- **Um `.m4a` ALAC (lossless) por faixa**, com tags embutidas.
+- **Um `.m4a` ALAC (lossless) por faixa**, com tags embutidas, mais o **MP3
+  320** correspondente na biblioteca por álbum (com capa, quando disponível).
 - Faixa pulada/interrompida antes de ~90% da duração ganha sufixo ` (partial)`.
 - **Pause não corta o arquivo** — ao retomar, a mesma faixa continua no mesmo
   arquivo.
