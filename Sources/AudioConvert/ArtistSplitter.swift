@@ -11,6 +11,7 @@ struct ArtistSplitter {
         "Zezé Di Camargo & Luciano",
         "César Menotti & Fabiano",
         "Guilherme & Santiago",
+        "Fernando & Sorocaba",
         "João Bosco & Vinícius",
         "Simon & Garfunkel",
         "Hall & Oates",
@@ -44,7 +45,7 @@ struct ArtistSplitter {
             // " & " divide, exceto duplas conhecidas. " e " nunca divide:
             // no Brasil é quase sempre nome de dupla (Jorge e Mateus etc.).
             if trimmed.contains(" & "), !keepTogether.contains(Self.foldKey(trimmed)) {
-                pieces += trimmed.components(separatedBy: " & ")
+                pieces += splitAmpersand(trimmed)
             } else {
                 pieces.append(trimmed)
             }
@@ -60,6 +61,27 @@ struct ArtistSplitter {
             if seen.insert(Self.foldKey(cleaned)).inserted {
                 result.append(cleaned)
             }
+        }
+        return result
+    }
+
+    /// Divide em " & ", reagrupando vizinhos que formam dupla conhecida:
+    /// "Fernando & Sorocaba & Dilsinho" → ["Fernando & Sorocaba", "Dilsinho"].
+    private func splitAmpersand(_ value: String) -> [String] {
+        let parts = value.components(separatedBy: " & ")
+        var result: [String] = []
+        var index = 0
+        while index < parts.count {
+            if index + 1 < parts.count {
+                let pair = parts[index] + " & " + parts[index + 1]
+                if keepTogether.contains(Self.foldKey(pair)) {
+                    result.append(pair)
+                    index += 2
+                    continue
+                }
+            }
+            result.append(parts[index])
+            index += 1
         }
         return result
     }

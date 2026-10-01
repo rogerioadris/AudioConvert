@@ -15,24 +15,7 @@ struct LibraryScanner {
     let probe: FfprobeReader
 
     func scan() throws -> [LibraryTrack] {
-        let fm = FileManager.default
-        var mp3s: [URL] = []
-        let enumerator = fm.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]  // cobre temps .enc-*/.pl-*
-        )
-        while let item = enumerator?.nextObject() as? URL {
-            // Playlists/ não é álbum — pular para não listar playlists como faixas.
-            if item.lastPathComponent == "Playlists", item.hasDirectoryPath {
-                enumerator?.skipDescendants()
-                continue
-            }
-            if item.pathExtension.lowercased() == "mp3" {
-                mp3s.append(item)
-            }
-        }
-
+        let mp3s = mp3Files()
         let rootPath = root.standardizedFileURL.path
         var tracks: [LibraryTrack] = []
         tracks.reserveCapacity(mp3s.count)
@@ -81,6 +64,28 @@ struct LibraryScanner {
             return a.relativePath.localizedStandardCompare(b.relativePath) == .orderedAscending
         }
         return tracks
+    }
+
+    /// Todos os MP3s da biblioteca, fora Playlists/ e arquivos ocultos.
+    func mp3Files() -> [URL] {
+        let fm = FileManager.default
+        var mp3s: [URL] = []
+        let enumerator = fm.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]  // cobre temps .enc-*/.pl-*
+        )
+        while let item = enumerator?.nextObject() as? URL {
+            // Playlists/ não é álbum — pular para não listar playlists como faixas.
+            if item.lastPathComponent == "Playlists", item.hasDirectoryPath {
+                enumerator?.skipDescendants()
+                continue
+            }
+            if item.pathExtension.lowercased() == "mp3" {
+                mp3s.append(item)
+            }
+        }
+        return mp3s.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }
 
     /// Remove o prefixo "NN - " ou "D-NN - " gerado pelo LibraryOrganizer.

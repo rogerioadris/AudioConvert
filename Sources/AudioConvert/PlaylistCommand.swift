@@ -12,7 +12,7 @@ struct PlaylistCommand: ParsableCommand {
     @Option(name: .shortAndLong, help: "Diretório de saída das gravações.")
     var output: String = "./Recordings"
 
-    @Option(name: .shortAndLong, help: "Pasta da biblioteca MP3 organizada por álbum. Padrão: <output>/Biblioteca.")
+    @Option(name: .shortAndLong, help: "Pasta da biblioteca MP3 (Álbuns/ e Singles e Parcerias/). Padrão: <output>/Biblioteca.")
     var library: String?
 
     @Option(name: .customLong("keep"), help: "Dupla com \"&\" que não deve ser dividida (repetível). Ex: --keep \"Sandy & Junior\".")

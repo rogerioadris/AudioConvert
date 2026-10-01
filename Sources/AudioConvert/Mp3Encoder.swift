@@ -20,18 +20,44 @@ struct Mp3Encoder: Sendable {
     /// Bloqueante: rodar dentro da task da conversionQueue. Falha nunca toca
     /// no ALAC de origem.
     func encode(alacURL: URL, metadata: TrackMetadata, artwork: ArtworkFile?, to destination: URL) throws {
+        try run(
+            input: alacURL,
+            audioCodec: ["-c:a", "libmp3lame", "-b:a", "320k"],
+            metadata: metadata, artwork: artwork, keepEmbeddedCover: false,
+            to: destination
+        )
+    }
+
+    /// Reescreve só as tags de um MP3 existente (áudio copiado, sem perda).
+    /// Sem `artwork`, a capa já embutida é preservada.
+    func retag(mp3URL: URL, metadata: TrackMetadata, artwork: ArtworkFile?, to destination: URL) throws {
+        try run(
+            input: mp3URL,
+            audioCodec: ["-c:a", "copy"],
+            metadata: metadata, artwork: artwork, keepEmbeddedCover: artwork == nil,
+            to: destination
+        )
+    }
+
+    private func run(
+        input: URL, audioCodec: [String], metadata: TrackMetadata,
+        artwork: ArtworkFile?, keepEmbeddedCover: Bool, to destination: URL
+    ) throws {
         let destDir = destination.deletingLastPathComponent()
         // Escreve num temp e move no sucesso — evita MP3 truncado no destino.
         let tempMP3 = destDir.appendingPathComponent(".enc-\(UUID().uuidString).mp3")
 
-        var args = ["-hide_banner", "-nostdin", "-y", "-i", alacURL.path]
+        var args = ["-hide_banner", "-nostdin", "-y", "-i", input.path]
         if let artwork {
             args += ["-i", artwork.url.path]
         }
-        args += ["-map", "0:a", "-c:a", "libmp3lame", "-b:a", "320k"]
-        if artwork != nil {
+        // -map_metadata -1: sem isso o ffmpeg herda as tags do arquivo de
+        // entrada (major_brand, iTunSMPB do M4A…), que não pertencem a um MP3.
+        args += ["-map", "0:a"] + audioCodec + ["-map_metadata", "-1"]
+        if artwork != nil || keepEmbeddedCover {
+            // "0:v?" = capa embutida, se existir; "?" evita erro quando não há.
             args += [
-                "-map", "1:v", "-c:v", "copy",
+                "-map", artwork != nil ? "1:v" : "0:v?", "-c:v", "copy",
                 "-metadata:s:v", "title=Album cover",
                 "-metadata:s:v", "comment=Cover (front)",
                 "-disposition:v", "attached_pic",
@@ -81,6 +107,12 @@ struct Mp3Encoder: Sendable {
             throw RuntimeError("ffmpeg saiu com código \(process.terminationStatus):\n\(tail)")
         }
 
-        try FileManager.default.moveItem(at: tempMP3, to: destination)
+        // Regravação da mesma faixa substitui o MP3 anterior.
+        let fm = FileManager.default
+        if fm.fileExists(atPath: destination.path) {
+            _ = try fm.replaceItemAt(destination, withItemAt: tempMP3)
+        } else {
+            try fm.moveItem(at: tempMP3, to: destination)
+        }
     }
 }

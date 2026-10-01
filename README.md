@@ -4,8 +4,8 @@ Gravador de áudio do **Apple Music** para macOS. Captura **apenas** o áudio do
 processo do Music (via Core Audio *process tap* — sem driver virtual, sem
 BlackHole) e salva **um arquivo ALAC (`.m4a`) por faixa**, nomeado e com tags a
 partir das notificações de troca de faixa do player. Cada faixa também é
-convertida para **MP3 320 kbps** e organizada numa biblioteca por álbum
-(`Recordings/Biblioteca/<Álbum>/NN - Título.mp3`), da qual dá para gerar
+convertida para **MP3 320 kbps** e organizada numa biblioteca (álbuns solo
+em `Álbuns/`, singles e parcerias numa pasta plana), da qual dá para gerar
 **playlists M3U8** (geral e por cantor).
 
 - Som de outros apps e do sistema **não** entra na gravação.
@@ -46,8 +46,8 @@ Binário em `.build/release/AudioConvert`.
 
 ## Uso
 
-O binário tem dois subcomandos: `record` (padrão — pode ser omitido) e
-`playlist`.
+O binário tem três subcomandos: `record` (padrão — pode ser omitido),
+`playlist` e `tags`.
 
 ### Gravar
 
@@ -65,8 +65,20 @@ O binário tem dois subcomandos: `record` (padrão — pode ser omitido) e
 Depois é só dar play no Apple Music (arquivos locais). A cada troca de faixa o
 gravador fecha o arquivo anterior, converte para ALAC, grava as tags (título,
 artista, álbum) e o salva como `Artista - Título.m4a`. Em seguida converte para
-MP3 320 (tags + capa embutidas) em
-`<biblioteca>/<Álbum>/NN - Título.mp3`.
+MP3 320 (tags + capa embutidas) na biblioteca:
+
+```
+Biblioteca/
+├── Álbuns/<Álbum>/NN - Título.mp3          ← faixa solo de álbum
+├── Singles e Parcerias/Artista - Título.mp3 ← single ou faixa com 2+ cantores
+└── Playlists/                               ← gerado pelo subcomando playlist
+```
+
+- Vai para **Singles e Parcerias** a faixa cujo álbum termina em `- Single`
+  ou cuja tag de artista tem mais de um cantor (mesmas regras de divisão das
+  playlists, abaixo; `--keep` também vale aqui).
+- Regravar a mesma faixa **substitui** o MP3 anterior (sem ` (2)`).
+- Gravações com menos de 5 s são descartadas.
 
 ### Gerar playlists
 
@@ -83,7 +95,7 @@ MP3 320 (tags + capa embutidas) em
 
 Escaneia os MP3s da biblioteca e escreve em `<Biblioteca>/Playlists/`:
 
-- `Biblioteca.m3u8` — todas as faixas, ordenadas por álbum e número da faixa.
+- `Biblioteca.m3u8` — todas as faixas, ordenadas por álbum e nome do arquivo.
 - `<Cantor>.m3u8` — uma playlist por cantor. Faixa com mais de um cantor na
   tag (ex.: `Anitta part. Ludmilla`) entra na playlist **de cada um**.
 
@@ -91,13 +103,39 @@ Regras de divisão da tag de artista:
 
 - Dividem: `feat.`, `ft.`, `part.`, `participação`, vírgula, `;`, `/` e ` & `.
 - ` & ` tem exceções: duplas conhecidas (Chitãozinho & Xororó, Sandy & Junior,
-  Zezé Di Camargo & Luciano…) ficam juntas — estenda com `--keep`.
+  Fernando & Sorocaba, Zezé Di Camargo & Luciano…) ficam juntas — estenda com `--keep`.
 - ` e ` nunca divide (Jorge e Mateus é dupla, não dois cantores).
 
 Rodar de novo regenera tudo: playlists de artistas que saíram da biblioteca
 são removidas. Os caminhos dentro do `.m3u8` são relativos, então a pasta da
 biblioteca pode ser movida inteira sem quebrar as playlists (VLC, Music,
 foobar2000 abrem direto).
+
+### Limpar e completar tags
+
+```sh
+# mostra o que mudaria (nada é gravado)
+.build/release/AudioConvert tags --fetch
+
+# aplica
+.build/release/AudioConvert tags --fetch --apply
+```
+
+Para cada MP3 da biblioteca:
+
+- Reescreve as tags **sem reencodar o áudio** (stream copiado) e remove lixo
+  herdado do M4A (`major_brand`, `iTunSMPB`…).
+- Com `--fetch`, busca a faixa na **iTunes Search API** (pública, sem chave;
+  envia artista e título à Apple) e só aceita resultado com **título e álbum
+  idênticos** (caixa/acentos ignorados). Preenche o que estiver vazio —
+  faixa/total, disco, ano **do álbum**, gênero e capa 1400×1400 — e corrige o
+  **artista do álbum** (o Music costuma repetir nele os convidados do feat).
+  Capa já embutida é mantida.
+- Move o arquivo para o destino atual do organizador (com número de faixa,
+  vira `Álbuns/<Álbum>/NN - Título.mp3`) e apaga pastas vazias.
+
+A API limita ~20 chamadas/min, então a busca leva ~3 s por faixa. `--country`
+troca a loja (padrão `BR`). Depois, rode `playlist` para atualizar os caminhos.
 
 **Teclas durante a execução:**
 
@@ -142,11 +180,11 @@ ffmpeg -i "Recordings/arquivo.m4a" -af astats -f null - 2>&1 | grep "Peak level"
 ## Comportamento
 
 - **Um `.m4a` ALAC (lossless) por faixa**, com tags embutidas, mais o **MP3
-  320** correspondente na biblioteca por álbum (com capa, quando disponível).
+  320** correspondente na biblioteca (com capa, quando disponível).
 - Faixa pulada/interrompida antes de ~90% da duração ganha sufixo ` (partial)`.
 - **Pause não corta o arquivo** — ao retomar, a mesma faixa continua no mesmo
   arquivo.
-- Nome de arquivo repetido ganha sufixo ` (2)`, ` (3)`…
+- Nome de `.m4a` repetido ganha sufixo ` (2)`, ` (3)`… (o MP3 da biblioteca é substituído).
 - Caracteres inválidos em nomes (`/`, `:`) viram `-`.
 - Arquivos temporários `.rec-*.caf` (ocultos) aparecem no diretório de saída
   durante a gravação e são apagados após a conversão. Se o app morrer no meio,

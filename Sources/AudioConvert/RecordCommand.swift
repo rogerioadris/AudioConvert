@@ -13,8 +13,11 @@ struct RecordCommand: ParsableCommand {
     @Option(name: .shortAndLong, help: "Diretório de saída das gravações.")
     var output: String = "./Recordings"
 
-    @Option(name: .shortAndLong, help: "Pasta da biblioteca MP3 organizada por álbum. Padrão: <output>/Biblioteca.")
+    @Option(name: .shortAndLong, help: "Pasta da biblioteca MP3 (Álbuns/ e Singles e Parcerias/). Padrão: <output>/Biblioteca.")
     var library: String?
+
+    @Option(name: .customLong("keep"), help: "Dupla com \"&\" que não conta como parceria (repetível). Ex: --keep \"Sandy & Junior\".")
+    var keep: [String] = []
 
     @Flag(name: .shortAndLong, help: "Toca o áudio nos alto-falantes durante a gravação (padrão: mudo).")
     var monitor = false
@@ -43,7 +46,7 @@ struct RecordCommand: ParsableCommand {
             recorder: recorder,
             exporter: exporter,
             mp3Encoder: Mp3Encoder(ffmpegURL: ffmpegURL),
-            organizer: LibraryOrganizer(root: libraryDir),
+            organizer: LibraryOrganizer(root: libraryDir, keep: keep),
             outputDir: outputDir
         )
 

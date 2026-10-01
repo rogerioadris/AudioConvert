@@ -9,6 +9,14 @@ struct FfprobeReader: Sendable {
         var artist: String
         var album: String
         var durationSeconds: Int  // -1 = desconhecida (convenção M3U)
+        var albumArtist: String = ""
+        var genre: String = ""
+        var year: Int? = nil
+        var trackNumber: Int? = nil
+        var trackCount: Int? = nil
+        var discNumber: Int? = nil
+        var discCount: Int? = nil
+        var hasCover = false
     }
 
     let ffprobeURL: URL
@@ -34,6 +42,7 @@ struct FfprobeReader: Sendable {
             "-v", "error",
             "-print_format", "json",
             "-show_format",
+            "-show_streams",
             mp3.path,
         ]
         let stdoutPipe = Pipe()
@@ -61,11 +70,35 @@ struct FfprobeReader: Sendable {
         }
 
         let duration = (format["duration"] as? String).flatMap(Double.init)
+        let streams = root["streams"] as? [[String: Any]] ?? []
+        let hasCover = streams.contains { stream in
+            let disposition = stream["disposition"] as? [String: Any]
+            return (disposition?["attached_pic"] as? Int) == 1
+        }
+        let track = Self.numberPair(tags["track"])
+        let disc = Self.numberPair(tags["disc"])
         return ProbeInfo(
             title: tags["title"] ?? "",
             artist: tags["artist"] ?? "",
             album: tags["album"] ?? "",
-            durationSeconds: duration.map { Int($0.rounded()) } ?? -1
+            durationSeconds: duration.map { Int($0.rounded()) } ?? -1,
+            albumArtist: tags["album_artist"] ?? "",
+            genre: tags["genre"] ?? "",
+            // "2016" ou "2016-05-20": só o ano interessa.
+            year: Int((tags["date"] ?? "").prefix(4)),
+            trackNumber: track.number,
+            trackCount: track.count,
+            discNumber: disc.number,
+            discCount: disc.count,
+            hasCover: hasCover
         )
+    }
+
+    /// Tags ID3 de faixa/disco vêm como "4" ou "4/15".
+    private static func numberPair(_ raw: String?) -> (number: Int?, count: Int?) {
+        let parts = (raw ?? "").split(separator: "/").map {
+            Int($0.trimmingCharacters(in: .whitespaces))
+        }
+        return (parts.first ?? nil, parts.count > 1 ? parts[1] : nil)
     }
 }

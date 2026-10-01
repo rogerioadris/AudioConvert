@@ -23,6 +23,9 @@ final class SessionController {
     private var currentArtwork: ArtworkFile?
     private var paused = false
 
+    /// Gravações abaixo disso são descartadas mesmo sem duração da faixa.
+    static let minimumSeconds = 5.0
+
     init(
         recorder: ProcessTapRecorder, exporter: AlacExporter,
         mp3Encoder: Mp3Encoder, organizer: LibraryOrganizer, outputDir: URL
@@ -123,6 +126,14 @@ final class SessionController {
         let recordedSeconds = recorder.sampleRate > 0
             ? Double(frames) / recorder.sampleRate
             : 0
+        // Sem duração conhecida a regra dos 90% não pega fragmentos (ex.: um
+        // clique de play/stop que vira "Faixa desconhecida" de 1s).
+        if recordedSeconds < Self.minimumSeconds {
+            try? FileManager.default.removeItem(at: tempURL)
+            if let artwork { try? FileManager.default.removeItem(at: artwork.url) }
+            Log.info("✗ Descartada (curta demais): \(metadata.displayName) (\(Int(recordedSeconds))s)")
+            return
+        }
         if let totalMS = metadata.totalTimeMS, totalMS > 0,
            recordedSeconds < (Double(totalMS) / 1000.0) * 0.9 {
             try? FileManager.default.removeItem(at: tempURL)
